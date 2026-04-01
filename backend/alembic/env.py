@@ -15,10 +15,18 @@ config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# TODO: Los modelos se importan aquí cuando existan, p.ej.:
-# from app.models.daily_metric import DailyMetric  # noqa: F401
-# target_metadata = Base.metadata
-target_metadata = None
+from app.db import Base
+from app.models import (  # noqa: F401
+    User,
+    Goal,
+    Checkin,
+    GarminDailyStats,
+    GarminSleep,
+    GarminHrv,
+    GarminActivity,
+)
+
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
