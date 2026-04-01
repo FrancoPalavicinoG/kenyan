@@ -16,4 +16,6 @@ class TodayMetrics(BaseModel):
     avg_respiration: Optional[float] = None
     avg_stress_level: Optional[int] = None
     total_steps: Optional[int] = None
+    active_kcal: Optional[float] = None
+    total_kcal: Optional[float] = None
     has_checkin_today: bool = False

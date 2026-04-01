@@ -56,5 +56,7 @@ def get_today_metrics(db: Session, user_id: int) -> TodayMetrics:
         avg_respiration=sleep.avg_respiration if sleep else None,
         avg_stress_level=stats.avg_stress_level if stats else None,
         total_steps=stats.total_steps if stats else None,
+        active_kcal=stats.active_kcal if stats else None,
+        total_kcal=stats.total_kcal if stats else None,
         has_checkin_today=has_checkin_today,
     )
