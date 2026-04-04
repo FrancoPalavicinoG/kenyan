@@ -1,6 +1,8 @@
+import { useQuery } from '@tanstack/react-query'
 import { StackNavigationProp } from '@react-navigation/stack'
 import React, { useRef, useState } from 'react'
 import {
+  ActivityIndicator,
   Animated,
   StyleSheet,
   Text,
@@ -12,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { RootStackParamList } from '../../App'
 import ProgressBars from '../components/ProgressBars'
 import StorySlide from '../components/StorySlide'
+import { checkinApi, metricsApi } from '../api'
 import { colors, radius, spacing, typography } from '../theme'
 
 type HomeScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Home'>
@@ -21,19 +24,6 @@ interface Props {
 }
 
 const TOTAL_SLIDES = 5
-const USER_NAME = 'Felipe'
-const MOCK = {
-  sleepHours: 6.6,
-  sleepAvg: 7.1,
-  respiration: 12,
-  hrv: 59,
-  hrvHistorical: 42,
-  readiness: 61,
-  readinessWeekAvg: 33,
-  suggestion: 'moderar' as const,
-  suggestionDetail:
-    'Aprovecha la buena energía pero evita otro HIIT. Dale 24h más a tu sistema nervioso para consolidar esta recuperación.',
-}
 
 function formatTodayDate(): string {
   const days = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO']
@@ -45,11 +35,40 @@ function formatTodayDate(): string {
   return `${days[now.getDay()]} · ${now.getDate()} ${months[now.getMonth()]}`
 }
 
+type SuggestionDia = 'fuerte' | 'moderar' | 'descansar'
+
+interface SuggestionConfig {
+  emoji: string
+  label: string
+  color: string
+  bg: string
+}
+
+function suggestionConfig(dia: SuggestionDia): SuggestionConfig {
+  switch (dia) {
+    case 'fuerte':
+      return { emoji: '💪', label: 'ENTRENAR FUERTE', color: colors.statusGood, bg: '#0D1A0D' }
+    case 'moderar':
+      return { emoji: '⚡', label: 'MODERAR HOY', color: colors.statusModerate, bg: '#1A1A0A' }
+    case 'descansar':
+      return { emoji: '😴', label: 'DESCANSAR', color: colors.statusLow, bg: '#1A0D00' }
+  }
+}
+
 export default function HomeScreen({ navigation }: Props) {
   const [currentSlide, setCurrentSlide] = useState(0)
   const fadeAnim = useRef(new Animated.Value(1)).current
   const { width, height } = useWindowDimensions()
-  const filledBars = Math.round(MOCK.readiness / 10)
+
+  const { data: metrics, isLoading: metricsLoading, error: metricsError } = useQuery({
+    queryKey: ['metrics', 'today'],
+    queryFn: metricsApi.getToday,
+  })
+
+  const { data: checkin } = useQuery({
+    queryKey: ['checkin', 'today'],
+    queryFn: checkinApi.getToday,
+  })
 
   function navigateTo(index: number) {
     if (index < 0) return
@@ -64,6 +83,37 @@ export default function HomeScreen({ navigation }: Props) {
     setCurrentSlide(index)
   }
 
+  if (metricsLoading) {
+    return (
+      <SafeAreaView style={[styles.container, styles.centered]}>
+        <ActivityIndicator color={colors.brand} size="large" />
+        <Text style={styles.loadingText}>Cargando tu mañana...</Text>
+      </SafeAreaView>
+    )
+  }
+
+  if (metricsError || !metrics) {
+    return (
+      <SafeAreaView style={[styles.container, styles.centered]}>
+        <Text style={styles.errorTitle}>No se pudo conectar al servidor</Text>
+        <Text style={styles.errorSubtitle}>Verifica que el backend está corriendo</Text>
+      </SafeAreaView>
+    )
+  }
+
+  const sleepHours = metrics.sleep_seconds
+    ? (metrics.sleep_seconds / 3600).toFixed(1)
+    : 'Sin datos'
+  const hrv = metrics.hrv_last_night_avg
+  const hrvStatus = metrics.hrv_status ?? 'Sin datos'
+  const readiness = metrics.readiness_score
+  const readinessLevel = metrics.readiness_level ?? 'Sin datos'
+  const filledBars = readiness ? Math.round(readiness / 10) : 0
+
+  const agentInsight = checkin?.workout_generated ?? null
+  const sugerenciaDia: SuggestionDia = (agentInsight?.sugerencia_dia as SuggestionDia) ?? 'moderar'
+  const suggestion = suggestionConfig(sugerenciaDia)
+
   const slides = [
     // Slide 0 — Saludo
     <View key={0} style={[styles.slide, { width, height, backgroundColor: '#0D1117', paddingHorizontal: spacing.xl, paddingTop: spacing.xl }]}>
@@ -71,7 +121,7 @@ export default function HomeScreen({ navigation }: Props) {
         <ProgressBars total={TOTAL_SLIDES} current={0} />
         <Text style={[styles.dateLabel, { marginTop: spacing.sm }]}>{formatTodayDate()}</Text>
         <Text style={styles.greeting}>Buenos días,</Text>
-        <Text style={styles.userName}>{USER_NAME} 👋</Text>
+        <Text style={styles.userName}>Kenyan 👋</Text>
         <Text style={styles.subGreeting}>Tu reloj estuvo trabajando mientras dormías.</Text>
       </View>
       <Text style={styles.tapHint}>tap para continuar →</Text>
@@ -83,15 +133,17 @@ export default function HomeScreen({ navigation }: Props) {
       backgroundColor='#0A1628'
       accentColor='#60A5FA'
       tag='TU NOCHE'
-      bigNumber={MOCK.sleepHours.toFixed(1)}
+      bigNumber={sleepHours.toString()}
       bigUnit='horas de sueño'
-      coachPhrase={`Ligeramente bajo tu promedio de ${MOCK.sleepAvg}h — pero la calidad fue buena. Tu frecuencia respiratoria se mantuvo estable.`}
+      coachPhrase='Tu frecuencia respiratoria se mantuvo estable durante la noche.'
       currentSlide={1}
       totalSlides={TOTAL_SLIDES}
     >
       <View style={styles.metricRow}>
         <View style={[styles.metricBox, { backgroundColor: 'rgba(96,165,250,0.1)' }]}>
-          <Text style={[styles.metricValue, { color: '#60A5FA' }]}>{MOCK.respiration}</Text>
+          <Text style={[styles.metricValue, { color: '#60A5FA' }]}>
+            {metrics.avg_respiration ? metrics.avg_respiration.toFixed(1) : '—'}
+          </Text>
           <Text style={[styles.metricLabel, { color: '#60A5FA' }]}>resp/min</Text>
         </View>
         <View style={[styles.metricBox, { backgroundColor: 'rgba(96,165,250,0.1)' }]}>
@@ -107,15 +159,15 @@ export default function HomeScreen({ navigation }: Props) {
       backgroundColor='#0D1F0D'
       accentColor={colors.brand}
       tag='TU SISTEMA NERVIOSO'
-      bigNumber={MOCK.hrv.toString()}
-      bigUnit={`ms de HRV · BALANCED`}
-      coachPhrase={`${MOCK.hrv - MOCK.hrvHistorical}ms por encima de tu histórico de ${MOCK.hrvHistorical}ms. Tu cuerpo está respondiendo bien a la carga reciente.`}
+      bigNumber={hrv?.toString() ?? 'N/A'}
+      bigUnit={`ms de HRV · ${hrvStatus}`}
+      coachPhrase='Tu sistema nervioso autónomo refleja cómo estás asimilando el entrenamiento reciente.'
       currentSlide={2}
       totalSlides={TOTAL_SLIDES}
     >
       <View style={styles.comparisonCard}>
-        <Text style={[styles.metricLabel, { color: colors.brand }]}>promedio 30 días</Text>
-        <Text style={[styles.comparisonValue, { color: colors.brand }]}>{MOCK.hrvHistorical} ms</Text>
+        <Text style={[styles.metricLabel, { color: colors.brand }]}>estado HRV</Text>
+        <Text style={[styles.comparisonValue, { color: colors.brand }]}>{hrvStatus}</Text>
       </View>
     </StorySlide>,
 
@@ -125,9 +177,9 @@ export default function HomeScreen({ navigation }: Props) {
       backgroundColor='#1A1A0A'
       accentColor={colors.statusModerate}
       tag='CÓMO AMANECISTE'
-      bigNumber={MOCK.readiness.toString()}
-      bigUnit='readiness · MODERATE'
-      coachPhrase={`Rebote claro desde el promedio de ${MOCK.readinessWeekAvg} de esta semana. Tu cuerpo salió del hoyo de fatiga — pero aún no al tope.`}
+      bigNumber={readiness?.toString() ?? 'N/A'}
+      bigUnit={`readiness · ${readinessLevel}`}
+      coachPhrase='El readiness integra HRV, sueño y estrés acumulado para darte una lectura global de recuperación.'
       currentSlide={3}
       totalSlides={TOTAL_SLIDES}
     >
@@ -147,18 +199,26 @@ export default function HomeScreen({ navigation }: Props) {
       </View>
     </StorySlide>,
 
-    // Slide 4 — Sugerencia
-    <View key={4} style={[styles.slide, { width, height, backgroundColor: '#1A0D00', paddingHorizontal: spacing.xl, paddingTop: spacing.xl }]}>
+    // Slide 4 — Sugerencia dinámica
+    <View key={4} style={[styles.slide, { width, height, backgroundColor: suggestion.bg, paddingHorizontal: spacing.xl, paddingTop: spacing.xl }]}>
       <ProgressBars total={TOTAL_SLIDES} current={4} />
       <View style={styles.suggestionContent}>
-        <Text style={[styles.slideTag, { color: colors.statusLow }]}>QUÉ HACER HOY</Text>
-        <Text style={styles.suggestionEmoji}>⚡</Text>
-        <Text style={[styles.suggestionLabel, { color: colors.statusLow }]}>MODERAR HOY</Text>
-        <Text style={styles.suggestionDetail}>{MOCK.suggestionDetail}</Text>
-        <View style={styles.ctaCard}>
-          <Text style={styles.ctaHint}>tap para continuar →</Text>
-          <Text style={styles.ctaText}>Responde el check-in para personalizar tu día</Text>
-        </View>
+        <Text style={[styles.slideTag, { color: suggestion.color }]}>QUÉ HACER HOY</Text>
+        <Text style={styles.suggestionEmoji}>{suggestion.emoji}</Text>
+        <Text style={[styles.suggestionLabel, { color: suggestion.color }]}>{suggestion.label}</Text>
+        <Text style={styles.suggestionDetail}>
+          {agentInsight?.sugerencia_detalle ?? 'Completa el check-in para recibir tu análisis personalizado.'}
+        </Text>
+        {agentInsight ? (
+          <Text style={styles.checkinDone}>✓ Check-in completado hoy</Text>
+        ) : (
+          <View style={[styles.ctaCard, { borderColor: `${suggestion.color}33`, backgroundColor: `${suggestion.color}14` }]}>
+            <Text style={[styles.ctaHint, { color: suggestion.color }]}>tap para continuar →</Text>
+            <Text style={[styles.ctaText, { color: suggestion.color }]}>
+              Responde el check-in para personalizar tu día
+            </Text>
+          </View>
+        )}
       </View>
     </View>,
   ]
@@ -187,6 +247,26 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bgBase,
+  },
+  centered: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    fontSize: typography.sm,
+    color: colors.textMuted,
+    marginTop: spacing.md,
+  },
+  errorTitle: {
+    fontSize: typography.base,
+    color: colors.textPrimary,
+    textAlign: 'center',
+  },
+  errorSubtitle: {
+    fontSize: typography.sm,
+    color: colors.textMuted,
+    marginTop: spacing.sm,
+    textAlign: 'center',
   },
   animatedContainer: {
     flex: 1,
@@ -291,21 +371,22 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     marginBottom: spacing.xl,
   },
+  checkinDone: {
+    fontSize: typography.xs,
+    color: colors.brand,
+    opacity: 0.7,
+  },
   ctaCard: {
-    backgroundColor: 'rgba(251,146,60,0.08)',
     borderWidth: 0.5,
-    borderColor: 'rgba(251,146,60,0.2)',
     borderRadius: radius.md,
     padding: spacing.md,
   },
   ctaHint: {
     fontSize: typography.xs,
-    color: colors.statusLow,
     opacity: 0.6,
     marginBottom: 4,
   },
   ctaText: {
     fontSize: typography.sm,
-    color: colors.statusLow,
   },
 })
